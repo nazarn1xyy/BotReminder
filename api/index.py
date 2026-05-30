@@ -5,8 +5,10 @@ Telegram Reminder Bot with AI - Serverless Function for Vercel
 import json
 import logging
 import os
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+from http.server import BaseHTTPRequestHandler
 
 import pytz
 from aiogram import Bot, Dispatcher, F
@@ -433,8 +435,6 @@ async def callback_delete_reminder(callback: CallbackQuery):
 # VERCEL SERVERLESS HANDLER
 # ============================================================================
 
-import asyncio
-
 async def process_update(body: dict):
     """Process Telegram update"""
     try:
@@ -443,32 +443,36 @@ async def process_update(body: dict):
     except Exception as e:
         logger.error(f"Error processing update: {e}")
 
-# Export handler at module level for Vercel
-def handler(request):
+class handler(BaseHTTPRequestHandler):
     """Vercel serverless handler"""
 
-    # GET request - health check
-    if request.method == 'GET':
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'status': 'ok', 'message': 'Reminder Bot is running'})
-        }
+    def do_GET(self):
+        """Handle GET requests"""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        response = json.dumps({'status': 'ok', 'message': 'Reminder Bot is running'})
+        self.wfile.write(response.encode())
 
-    # POST request - webhook
-    try:
-        body = json.loads(request.body)
-        asyncio.run(process_update(body))
+    def do_POST(self):
+        """Handle POST requests (webhook)"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            body = json.loads(post_data.decode('utf-8'))
 
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'ok': True})
-        }
-    except Exception as e:
-        logger.error(f"Handler error: {e}")
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'ok': True})
-        }
+            # Process update asynchronously
+            asyncio.run(process_update(body))
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = json.dumps({'ok': True})
+            self.wfile.write(response.encode())
+        except Exception as e:
+            logger.error(f"Handler error: {e}")
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = json.dumps({'ok': True})
+            self.wfile.write(response.encode())
