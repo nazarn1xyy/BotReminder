@@ -1,0 +1,594 @@
+"""
+Telegram Reminder Bot with AI - Serverless Function for Vercel
+"""
+
+import json
+import logging
+import os
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
+from urllib.parse import parse_qs
+
+import pytz
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Update, Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "ВСТАВИТЬ_TELEGRAM_BOT_TOKEN")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "7eMrGygzAbBjIhIuFXDEYqrMaxpyuHh5")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "my_secret_webhook_key")
+DEFAULT_TIMEZONE = "Europe/Chisinau"
+
+PREMIUM_EMOJI = {
+    "reminder": "⏰",
+    "time": "🕐",
+    "success": "✅",
+    "error": "❌",
+    "settings": "⚙️",
+    "category": "📁",
+    "priority": "⭐",
+    "list": "📋",
+}
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# IN-MEMORY STORAGE (для демо, в продакшене использовать БД)
+# ============================================================================
+
+# Глобальное хранилище (сохраняется между вызовами в рамках одного инстанса)
+USERS_DB = {}
+REMINDERS_DB = {}
+NOTIFICATIONS_SENT = {}
+
+def ensure_user_exists(user_id: int):
+    """Ensure user exists in storage"""
+    if user_id not in USERS_DB:
+        USERS_DB[user_id] = {
+            "user_id": user_id,
+            "timezone": DEFAULT_TIMEZONE,
+            "morning_summary_time": "08:00",
+            "created_at": datetime.now().isoformat()
+        }
+
+def add_reminder(user_id: int, reminder_data: Dict[str, Any]) -> int:
+    """Add reminder to storage"""
+    reminder_id = len(REMINDERS_DB) + 1
+
+    REMINDERS_DB[reminder_id] = {
+        "id": reminder_id,
+        "user_id": user_id,
+        "title": reminder_data["title"],
+        "date": reminder_data["date"],
+        "time": reminder_data["time"],
+        "category": reminder_data.get("category", "другое"),
+        "priority": reminder_data.get("priority", "обычное"),
+        "repeat": reminder_data.get("repeat", "none"),
+        "remind_before_minutes": reminder_data.get("remind_before_minutes", [120, 30, 0]),
+        "completed": False,
+        "created_at": datetime.now().isoformat()
+    }
+
+    return reminder_id
+
+def get_user_reminders(user_id: int, completed: bool = False) -> List[Dict]:
+    """Get user reminders"""
+    reminders = []
+    for reminder in REMINDERS_DB.values():
+        if reminder["user_id"] == user_id and reminder["completed"] == completed:
+            reminders.append(reminder)
+
+    # Sort by date and time
+    reminders.sort(key=lambda x: (x["date"], x["time"]))
+    return reminders
+
+def get_today_reminders(user_id: int, user_timezone: str = DEFAULT_TIMEZONE) -> List[Dict]:
+    """Get today's reminders"""
+    tz = pytz.timezone(user_timezone)
+    today = datetime.now(tz).strftime('%Y-%m-%d')
+
+    reminders = []
+    for reminder in REMINDERS_DB.values():
+        if reminder["user_id"] == user_id and reminder["date"] == today and not reminder["completed"]:
+            reminders.append(reminder)
+
+    reminders.sort(key=lambda x: x["time"])
+    return reminders
+
+def mark_reminder_completed(reminder_id: int):
+    """Mark reminder as completed"""
+    if reminder_id in REMINDERS_DB:
+        REMINDERS_DB[reminder_id]["completed"] = True
+
+def delete_reminder(reminder_id: int):
+    """Delete reminder"""
+    if reminder_id in REMINDERS_DB:
+        del REMINDERS_DB[reminder_id]
+
+    # Delete notifications
+    to_delete = [k for k, v in NOTIFICATIONS_SENT.items() if v["reminder_id"] == reminder_id]
+    for k in to_delete:
+        del NOTIFICATIONS_SENT[k]
+
+# ============================================================================
+# FSM STATES
+# ============================================================================
+
+class ReminderStates(StatesGroup):
+    waiting_for_time = State()
+    waiting_for_date = State()
+    waiting_for_title = State()
+
+# ============================================================================
+# AI INTEGRATION (MISTRAL)
+# ============================================================================
+
+async def parse_reminder_with_ai(text: str, user_timezone: str = DEFAULT_TIMEZONE) -> Dict[str, Any]:
+    """Parse reminder text using Mistral AI"""
+    import httpx
+
+    system_prompt = f"""You are a reminder parsing assistant. Parse the user's message and extract reminder information.
+Current timezone: {user_timezone}
+Current date: {datetime.now(pytz.timezone(user_timezone)).strftime('%Y-%m-%d')}
+Current time: {datetime.now(pytz.timezone(user_timezone)).strftime('%H:%M')}
+
+Return JSON with these fields:
+- title: event name
+- date: YYYY-MM-DD format
+- time: HH:MM format (24-hour)
+- category: личное/работа/учёба/здоровье/финансы/важное/другое
+- priority: обычное/важное/срочное
+- repeat: none/daily/weekly/monthly/yearly
+- remind_before_minutes: array like [120, 30, 0]
+- needs_clarification: true if missing critical info
+- clarification_question: question to ask user if needs_clarification is true
+
+Examples:
+"стрижка завтра в 15:00" -> {{"title": "стрижка", "date": "2026-05-31", "time": "15:00", "category": "личное", "priority": "обычное", "repeat": "none", "remind_before_minutes": [120, 30, 0], "needs_clarification": false}}
+"встреча 3 июня" -> {{"title": "встреча", "date": "2026-06-03", "time": null, "needs_clarification": true, "clarification_question": "Во сколько напомнить?"}}
+"""
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MISTRAL_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "mistral-small-latest",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text}
+                    ],
+                    "temperature": 0.3,
+                    "response_format": {"type": "json_object"}
+                }
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                content = result["choices"][0]["message"]["content"]
+                parsed = json.loads(content)
+                return parsed
+            else:
+                logger.error(f"Mistral API error: {response.status_code}")
+                return {
+                    "needs_clarification": True,
+                    "clarification_question": "Не удалось распознать напоминание. Попробуйте написать в формате: 'название дата время'"
+                }
+    except Exception as e:
+        logger.error(f"Error parsing with AI: {e}")
+        return {
+            "needs_clarification": True,
+            "clarification_question": "Произошла ошибка. Попробуйте написать в формате: 'название дата время'"
+        }
+
+# ============================================================================
+# KEYBOARD BUILDERS
+# ============================================================================
+
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get main menu keyboard"""
+    keyboard = [
+        [
+            InlineKeyboardButton(text=f"{PREMIUM_EMOJI['list']} Мои напоминания", callback_data="list_reminders"),
+            InlineKeyboardButton(text=f"{PREMIUM_EMOJI['reminder']} Добавить", callback_data="add_reminder")
+        ],
+        [
+            InlineKeyboardButton(text=f"{PREMIUM_EMOJI['time']} Сегодня", callback_data="today_reminders"),
+            InlineKeyboardButton(text=f"{PREMIUM_EMOJI['settings']} Настройки", callback_data="settings")
+        ],
+        [
+            InlineKeyboardButton(text="❓ Помощь", callback_data="help")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_reminder_actions_keyboard(reminder_id: int) -> InlineKeyboardMarkup:
+    """Get reminder actions keyboard"""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="✏️ Изменить", callback_data=f"edit_{reminder_id}"),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{reminder_id}")
+        ],
+        [
+            InlineKeyboardButton(text="📅 Перенести", callback_data=f"reschedule_{reminder_id}"),
+            InlineKeyboardButton(text=f"{PREMIUM_EMOJI['success']} Выполнено", callback_data=f"complete_{reminder_id}")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Назад", callback_data="list_reminders")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# ============================================================================
+# BOT SETUP
+# ============================================================================
+
+bot = Bot(token=BOT_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+
+# ============================================================================
+# BOT HANDLERS
+# ============================================================================
+
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    """Handle /start command"""
+    ensure_user_exists(message.from_user.id)
+
+    welcome_text = f"""
+{PREMIUM_EMOJI['reminder']} Привет! Я бот-напоминалка с ИИ.
+
+Просто напишите мне обычным текстом, что и когда вам напомнить:
+• "стрижка завтра в 15:00"
+• "встреча 3 июня в 10:00"
+• "купить молоко сегодня в 18:00"
+
+Я пойму и создам напоминание!
+"""
+
+    await message.answer(welcome_text, reply_markup=get_main_menu_keyboard())
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    """Handle /help command"""
+    help_text = """
+📖 Как пользоваться ботом:
+
+1️⃣ Просто напишите напоминание обычным текстом
+2️⃣ Я распознаю дату, время и событие
+3️⃣ Если чего-то не хватает, я уточню
+
+Команды:
+/start - главное меню
+/list - мои напоминания
+/today - задачи на сегодня
+/settings - настройки
+/help - эта справка
+
+Примеры:
+• "стрижка завтра в 15:00"
+• "встреча 3 июня"
+• "купить молоко сегодня"
+"""
+    await message.answer(help_text, reply_markup=get_main_menu_keyboard())
+
+@dp.message(Command("list"))
+async def cmd_list(message: Message):
+    """Handle /list command"""
+    reminders = get_user_reminders(message.from_user.id)
+
+    if not reminders:
+        await message.answer("У вас пока нет напоминаний", reply_markup=get_main_menu_keyboard())
+        return
+
+    text = f"{PREMIUM_EMOJI['list']} Ваши напоминания:\n\n"
+    for r in reminders:
+        text += f"📌 {r['title']}\n"
+        text += f"📅 {r['date']} в {r['time']}\n"
+        text += f"{PREMIUM_EMOJI['category']} {r['category']} | {PREMIUM_EMOJI['priority']} {r['priority']}\n\n"
+
+    await message.answer(text, reply_markup=get_main_menu_keyboard())
+
+@dp.message(Command("today"))
+async def cmd_today(message: Message):
+    """Handle /today command"""
+    reminders = get_today_reminders(message.from_user.id)
+
+    if not reminders:
+        await message.answer("На сегодня напоминаний нет", reply_markup=get_main_menu_keyboard())
+        return
+
+    text = f"{PREMIUM_EMOJI['time']} Задачи на сегодня:\n\n"
+    for r in reminders:
+        text += f"📌 {r['title']} в {r['time']}\n"
+
+    await message.answer(text, reply_markup=get_main_menu_keyboard())
+
+@dp.message(Command("settings"))
+async def cmd_settings(message: Message):
+    """Handle /settings command"""
+    text = f"{PREMIUM_EMOJI['settings']} Настройки:\n\nЧасовой пояс: {DEFAULT_TIMEZONE}\nУтренняя сводка: 08:00"
+    await message.answer(text, reply_markup=get_main_menu_keyboard())
+
+@dp.message(F.text)
+async def handle_text_message(message: Message, state: FSMContext):
+    """Handle text messages"""
+    ensure_user_exists(message.from_user.id)
+
+    current_state = await state.get_state()
+
+    if current_state == ReminderStates.waiting_for_time:
+        data = await state.get_data()
+        data["time"] = message.text
+
+        reminder_id = add_reminder(message.from_user.id, data)
+
+        await state.clear()
+        await message.answer(
+            f"{PREMIUM_EMOJI['success']} Напоминание создано!\n\n"
+            f"📌 {data['title']}\n"
+            f"📅 {data['date']} в {data['time']}",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+
+    parsed = await parse_reminder_with_ai(message.text)
+
+    if parsed.get("needs_clarification"):
+        await message.answer(parsed["clarification_question"])
+
+        if not parsed.get("time"):
+            await state.set_state(ReminderStates.waiting_for_time)
+            await state.update_data(
+                title=parsed.get("title", ""),
+                date=parsed.get("date", ""),
+                category=parsed.get("category", "другое"),
+                priority=parsed.get("priority", "обычное"),
+                repeat=parsed.get("repeat", "none"),
+                remind_before_minutes=parsed.get("remind_before_minutes", [120, 30, 0])
+            )
+        return
+
+    reminder_id = add_reminder(message.from_user.id, parsed)
+
+    await message.answer(
+        f"{PREMIUM_EMOJI['success']} Напоминание создано!\n\n"
+        f"📌 {parsed['title']}\n"
+        f"📅 {parsed['date']} в {parsed['time']}\n"
+        f"{PREMIUM_EMOJI['category']} {parsed['category']} | {PREMIUM_EMOJI['priority']} {parsed['priority']}",
+        reply_markup=get_main_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "list_reminders")
+async def callback_list_reminders(callback: CallbackQuery):
+    """Handle list reminders callback"""
+    reminders = get_user_reminders(callback.from_user.id)
+
+    if not reminders:
+        await callback.message.edit_text("У вас пока нет напоминаний", reply_markup=get_main_menu_keyboard())
+        return
+
+    text = f"{PREMIUM_EMOJI['list']} Ваши напоминания:\n\n"
+    for r in reminders:
+        text += f"📌 {r['title']}\n"
+        text += f"📅 {r['date']} в {r['time']}\n"
+        text += f"{PREMIUM_EMOJI['category']} {r['category']} | {PREMIUM_EMOJI['priority']} {r['priority']}\n\n"
+
+    await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_reminder")
+async def callback_add_reminder(callback: CallbackQuery):
+    """Handle add reminder callback"""
+    await callback.message.edit_text(
+        "Напишите напоминание обычным текстом, например:\n\n"
+        "• стрижка завтра в 15:00\n"
+        "• встреча 3 июня в 10:00\n"
+        "• купить молоко сегодня",
+        reply_markup=get_main_menu_keyboard()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "today_reminders")
+async def callback_today_reminders(callback: CallbackQuery):
+    """Handle today reminders callback"""
+    reminders = get_today_reminders(callback.from_user.id)
+
+    if not reminders:
+        await callback.message.edit_text("На сегодня напоминаний нет", reply_markup=get_main_menu_keyboard())
+        return
+
+    text = f"{PREMIUM_EMOJI['time']} Задачи на сегодня:\n\n"
+    for r in reminders:
+        text += f"📌 {r['title']} в {r['time']}\n"
+
+    await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+    await callback.answer()
+
+@dp.callback_query(F.data == "settings")
+async def callback_settings(callback: CallbackQuery):
+    """Handle settings callback"""
+    text = f"{PREMIUM_EMOJI['settings']} Настройки:\n\nЧасовой пояс: {DEFAULT_TIMEZONE}\nУтренняя сводка: 08:00"
+    await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+    await callback.answer()
+
+@dp.callback_query(F.data == "help")
+async def callback_help(callback: CallbackQuery):
+    """Handle help callback"""
+    help_text = """
+📖 Как пользоваться ботом:
+
+1️⃣ Просто напишите напоминание обычным текстом
+2️⃣ Я распознаю дату, время и событие
+3️⃣ Если чего-то не хватает, я уточню
+
+Команды:
+/start - главное меню
+/list - мои напоминания
+/today - задачи на сегодня
+/settings - настройки
+/help - эта справка
+"""
+    await callback.message.edit_text(help_text, reply_markup=get_main_menu_keyboard())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("complete_"))
+async def callback_complete_reminder(callback: CallbackQuery):
+    """Handle complete reminder callback"""
+    reminder_id = int(callback.data.split("_")[1])
+    mark_reminder_completed(reminder_id)
+
+    await callback.message.edit_text(
+        f"{PREMIUM_EMOJI['success']} Напоминание отмечено как выполненное!",
+        reply_markup=get_main_menu_keyboard()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("delete_"))
+async def callback_delete_reminder(callback: CallbackQuery):
+    """Handle delete reminder callback"""
+    reminder_id = int(callback.data.split("_")[1])
+    delete_reminder(reminder_id)
+
+    await callback.message.edit_text(
+        "🗑 Напоминание удалено",
+        reply_markup=get_main_menu_keyboard()
+    )
+    await callback.answer()
+
+# ============================================================================
+# CRON HANDLER
+# ============================================================================
+
+async def check_and_send_reminders() -> Dict[str, int]:
+    """Check reminders and send notifications"""
+    sent_count = 0
+
+    for reminder in REMINDERS_DB.values():
+        if reminder["completed"]:
+            continue
+
+        user_id = reminder["user_id"]
+        user_timezone = USERS_DB.get(user_id, {}).get("timezone", DEFAULT_TIMEZONE)
+
+        tz = pytz.timezone(user_timezone)
+        now = datetime.now(tz)
+
+        reminder_datetime = datetime.strptime(
+            f"{reminder['date']} {reminder['time']}",
+            "%Y-%m-%d %H:%M"
+        )
+        reminder_datetime = tz.localize(reminder_datetime)
+
+        for minutes_before in reminder["remind_before_minutes"]:
+            notification_time = reminder_datetime - timedelta(minutes=minutes_before)
+
+            if now >= notification_time and now < notification_time + timedelta(minutes=5):
+                notif_key = f"{reminder['id']}_{minutes_before}"
+
+                if notif_key not in NOTIFICATIONS_SENT:
+                    if minutes_before == 0:
+                        text = f"{PREMIUM_EMOJI['time']} Напоминание!\n\n📌 {reminder['title']}\n⏰ Сейчас!"
+                    else:
+                        text = f"{PREMIUM_EMOJI['time']} Напоминание!\n\n📌 {reminder['title']}\n⏰ Через {minutes_before} минут"
+
+                    try:
+                        await bot.send_message(user_id, text)
+                        NOTIFICATIONS_SENT[notif_key] = {
+                            "reminder_id": reminder["id"],
+                            "minutes_before": minutes_before,
+                            "sent_at": datetime.now().isoformat()
+                        }
+                        sent_count += 1
+                    except Exception as e:
+                        logger.error(f"Error sending notification: {e}")
+
+    return {"sent": sent_count}
+
+# ============================================================================
+# VERCEL SERVERLESS HANDLER
+# ============================================================================
+
+async def handler(event, context):
+    """Main serverless handler for Vercel"""
+
+    # Parse request
+    http_method = event.get("httpMethod", "GET")
+    path = event.get("path", "/")
+    body = event.get("body", "")
+
+    logger.info(f"Request: {http_method} {path}")
+
+    # Root endpoint
+    if path == "/" or path == "/api/webhook":
+        if http_method == "GET":
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"status": "ok", "message": "Reminder Bot is running"})
+            }
+
+        # Webhook handler
+        if http_method == "POST":
+            try:
+                update_data = json.loads(body)
+                update = Update.model_validate(update_data, context={"bot": bot})
+                await dp.feed_update(bot, update)
+
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"ok": True})
+                }
+            except Exception as e:
+                logger.error(f"Error handling webhook: {e}")
+                return {
+                    "statusCode": 500,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"error": str(e)})
+                }
+
+    # Cron endpoint
+    elif path == "/api/cron":
+        try:
+            result = await check_and_send_reminders()
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "status": "success",
+                    "notifications_sent": result["sent"],
+                    "timestamp": datetime.now().isoformat()
+                })
+            }
+        except Exception as e:
+            logger.error(f"Error in cron: {e}")
+            return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"error": str(e)})
+            }
+
+    # Unknown path
+    return {
+        "statusCode": 404,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"error": "Not found"})
+    }
