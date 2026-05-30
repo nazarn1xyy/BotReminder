@@ -438,10 +438,14 @@ async def callback_delete_reminder(callback: CallbackQuery):
 async def process_update(body: dict):
     """Process Telegram update"""
     try:
+        logger.info(f"Processing update: {body}")
         update = Update.model_validate(body, context={"bot": bot})
+        logger.info(f"Update validated: {update}")
+        logger.info(f"Registered handlers: {len(dp.observers)}")
         await dp.feed_update(bot, update)
+        logger.info("Update processed successfully")
     except Exception as e:
-        logger.error(f"Error processing update: {e}")
+        logger.error(f"Error processing update: {e}", exc_info=True)
 
 class handler(BaseHTTPRequestHandler):
     """Vercel serverless handler"""

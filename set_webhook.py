@@ -5,7 +5,7 @@ import httpx
 import sys
 
 BOT_TOKEN = "8926447955:AAEKjSAYuaAFg-8VdS5YBVYNavMwt10QrNM"
-WEBHOOK_URL = "https://bot-reminder.vercel.app/api/index"
+WEBHOOK_URL = "https://bot-reminder.vercel.app/api"
 
 def set_webhook():
     """Set webhook for Telegram bot"""
