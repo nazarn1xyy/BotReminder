@@ -425,10 +425,6 @@ async def callback_delete_reminder(callback: CallbackQuery):
 
 def register_handlers():
     """Register all handlers"""
-    # Clear existing handlers to avoid duplicates
-    dp.message.handlers.clear()
-    dp.callback_query.handlers.clear()
-
     # Register message handlers
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(cmd_help, Command("help"))
