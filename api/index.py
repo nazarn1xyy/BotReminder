@@ -423,21 +423,27 @@ async def callback_delete_reminder(callback: CallbackQuery):
 # REGISTER HANDLERS
 # ============================================================================
 
-# Register message handlers
-dp.message.register(cmd_start, Command("start"))
-dp.message.register(cmd_help, Command("help"))
-dp.message.register(cmd_list, Command("list"))
-dp.message.register(cmd_today, Command("today"))
-dp.message.register(handle_text_message, F.text)
+def register_handlers():
+    """Register all handlers"""
+    # Clear existing handlers to avoid duplicates
+    dp.message.handlers.clear()
+    dp.callback_query.handlers.clear()
 
-# Register callback handlers
-dp.callback_query.register(callback_list_reminders, F.data == "list_reminders")
-dp.callback_query.register(callback_add_reminder, F.data == "add_reminder")
-dp.callback_query.register(callback_today_reminders, F.data == "today_reminders")
-dp.callback_query.register(callback_settings, F.data == "settings")
-dp.callback_query.register(callback_help, F.data == "help")
-dp.callback_query.register(callback_complete_reminder, F.data.startswith("complete_"))
-dp.callback_query.register(callback_delete_reminder, F.data.startswith("delete_"))
+    # Register message handlers
+    dp.message.register(cmd_start, Command("start"))
+    dp.message.register(cmd_help, Command("help"))
+    dp.message.register(cmd_list, Command("list"))
+    dp.message.register(cmd_today, Command("today"))
+    dp.message.register(handle_text_message, F.text)
+
+    # Register callback handlers
+    dp.callback_query.register(callback_list_reminders, F.data == "list_reminders")
+    dp.callback_query.register(callback_add_reminder, F.data == "add_reminder")
+    dp.callback_query.register(callback_today_reminders, F.data == "today_reminders")
+    dp.callback_query.register(callback_settings, F.data == "settings")
+    dp.callback_query.register(callback_help, F.data == "help")
+    dp.callback_query.register(callback_complete_reminder, F.data.startswith("complete_"))
+    dp.callback_query.register(callback_delete_reminder, F.data.startswith("delete_"))
 
 # ============================================================================
 # VERCEL SERVERLESS HANDLER
@@ -446,6 +452,9 @@ dp.callback_query.register(callback_delete_reminder, F.data.startswith("delete_"
 async def process_update(body: dict):
     """Process Telegram update"""
     try:
+        # Register handlers on each request
+        register_handlers()
+
         logger.info(f"Processing update: {body}")
         update = Update.model_validate(body, context={"bot": bot})
         logger.info(f"Update validated: {update}")
