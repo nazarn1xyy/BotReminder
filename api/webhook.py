@@ -7,7 +7,6 @@ import logging
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from urllib.parse import parse_qs
 
 import pytz
 from aiogram import Bot, Dispatcher, F
@@ -21,7 +20,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # CONFIGURATION
 # ============================================================================
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "ВСТАВИТЬ_TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8926447955:AAEKjSAYuaAFg-8VdS5YBVYNavMwt10QrNM")
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "7eMrGygzAbBjIhIuFXDEYqrMaxpyuHh5")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "my_secret_webhook_key")
 DEFAULT_TIMEZONE = "Europe/Chisinau"
@@ -45,10 +44,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# IN-MEMORY STORAGE (для демо, в продакшене использовать БД)
+# IN-MEMORY STORAGE
 # ============================================================================
 
-# Глобальное хранилище (сохраняется между вызовами в рамках одного инстанса)
 USERS_DB = {}
 REMINDERS_DB = {}
 NOTIFICATIONS_SENT = {}
@@ -90,7 +88,6 @@ def get_user_reminders(user_id: int, completed: bool = False) -> List[Dict]:
         if reminder["user_id"] == user_id and reminder["completed"] == completed:
             reminders.append(reminder)
 
-    # Sort by date and time
     reminders.sort(key=lambda x: (x["date"], x["time"]))
     return reminders
 
@@ -117,7 +114,6 @@ def delete_reminder(reminder_id: int):
     if reminder_id in REMINDERS_DB:
         del REMINDERS_DB[reminder_id]
 
-    # Delete notifications
     to_delete = [k for k, v in NOTIFICATIONS_SENT.items() if v["reminder_id"] == reminder_id]
     for k in to_delete:
         del NOTIFICATIONS_SENT[k]
@@ -523,72 +519,28 @@ async def check_and_send_reminders() -> Dict[str, int]:
     return {"sent": sent_count}
 
 # ============================================================================
-# VERCEL SERVERLESS HANDLER
+# VERCEL SERVERLESS HANDLER (like Node.js module.exports)
 # ============================================================================
 
-async def handler(event, context):
-    """Main serverless handler for Vercel"""
+async def handler(request, response):
+    """Main serverless handler for Vercel (Python equivalent of module.exports)"""
 
-    # Parse request
-    http_method = event.get("httpMethod", "GET")
-    path = event.get("path", "/")
-    body = event.get("body", "")
+    # Quick response for GET requests
+    if request.method != 'POST':
+        response.status_code = 200
+        return {"status": "ok", "message": "Reminder Bot is running"}
 
-    logger.info(f"Request: {http_method} {path}")
+    try:
+        # Get request body
+        body = await request.json()
 
-    # Root endpoint
-    if path == "/" or path == "/api/webhook":
-        if http_method == "GET":
-            return {
-                "statusCode": 200,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({"status": "ok", "message": "Reminder Bot is running"})
-            }
+        # Handle webhook update
+        update = Update.model_validate(body, context={"bot": bot})
+        await dp.feed_update(bot, update)
 
-        # Webhook handler
-        if http_method == "POST":
-            try:
-                update_data = json.loads(body)
-                update = Update.model_validate(update_data, context={"bot": bot})
-                await dp.feed_update(bot, update)
-
-                return {
-                    "statusCode": 200,
-                    "headers": {"Content-Type": "application/json"},
-                    "body": json.dumps({"ok": True})
-                }
-            except Exception as e:
-                logger.error(f"Error handling webhook: {e}")
-                return {
-                    "statusCode": 500,
-                    "headers": {"Content-Type": "application/json"},
-                    "body": json.dumps({"error": str(e)})
-                }
-
-    # Cron endpoint
-    elif path == "/api/cron":
-        try:
-            result = await check_and_send_reminders()
-            return {
-                "statusCode": 200,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({
-                    "status": "success",
-                    "notifications_sent": result["sent"],
-                    "timestamp": datetime.now().isoformat()
-                })
-            }
-        except Exception as e:
-            logger.error(f"Error in cron: {e}")
-            return {
-                "statusCode": 500,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({"error": str(e)})
-            }
-
-    # Unknown path
-    return {
-        "statusCode": 404,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"error": "Not found"})
-    }
+        response.status_code = 200
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        response.status_code = 200
+        return {"ok": True}
