@@ -519,28 +519,53 @@ async def check_and_send_reminders() -> Dict[str, int]:
     return {"sent": sent_count}
 
 # ============================================================================
-# VERCEL SERVERLESS HANDLER (like Node.js module.exports)
+# VERCEL SERVERLESS HANDLER
 # ============================================================================
 
-async def handler(request, response):
-    """Main serverless handler for Vercel (Python equivalent of module.exports)"""
+from http.server import BaseHTTPRequestHandler
+import asyncio
 
-    # Quick response for GET requests
-    if request.method != 'POST':
-        response.status_code = 200
-        return {"status": "ok", "message": "Reminder Bot is running"}
+class handler(BaseHTTPRequestHandler):
+    """Vercel serverless handler"""
 
-    try:
-        # Get request body
-        body = await request.json()
+    def do_GET(self):
+        """Handle GET requests"""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        response = json.dumps({"status": "ok", "message": "Reminder Bot is running"})
+        self.wfile.write(response.encode())
+        return
 
-        # Handle webhook update
-        update = Update.model_validate(body, context={"bot": bot})
-        await dp.feed_update(bot, update)
+    def do_POST(self):
+        """Handle POST requests (webhook)"""
+        try:
+            # Read request body
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            body = json.loads(post_data.decode('utf-8'))
 
-        response.status_code = 200
-        return {"ok": True}
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        response.status_code = 200
-        return {"ok": True}
+            # Process update asynchronously
+            asyncio.run(self._process_update(body))
+
+            # Send response
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = json.dumps({"ok": True})
+            self.wfile.write(response.encode())
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = json.dumps({"ok": True})
+            self.wfile.write(response.encode())
+
+    async def _process_update(self, body):
+        """Process Telegram update"""
+        try:
+            update = Update.model_validate(body, context={"bot": bot})
+            await dp.feed_update(bot, update)
+        except Exception as e:
+            logger.error(f"Error processing update: {e}")
