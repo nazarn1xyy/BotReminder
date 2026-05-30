@@ -433,6 +433,8 @@ async def callback_delete_reminder(callback: CallbackQuery):
 # VERCEL SERVERLESS HANDLER
 # ============================================================================
 
+import asyncio
+
 async def process_update(body: dict):
     """Process Telegram update"""
     try:
@@ -441,9 +443,9 @@ async def process_update(body: dict):
     except Exception as e:
         logger.error(f"Error processing update: {e}")
 
+# Export handler at module level for Vercel
 def handler(request):
     """Vercel serverless handler"""
-    import asyncio
 
     # GET request - health check
     if request.method == 'GET':
