@@ -22,7 +22,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8926447955:AAEKjSAYuaAFg-8VdS5YBVYNavMwt10QrNM")
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "7eMrGygzAbBjIhIuFXDEYqrMaxpyuHh5")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "my_secret_webhook_key")
 DEFAULT_TIMEZONE = "Europe/Chisinau"
 
 PREMIUM_EMOJI = {
@@ -214,23 +213,6 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_reminder_actions_keyboard(reminder_id: int) -> InlineKeyboardMarkup:
-    """Get reminder actions keyboard"""
-    keyboard = [
-        [
-            InlineKeyboardButton(text="✏️ Изменить", callback_data=f"edit_{reminder_id}"),
-            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{reminder_id}")
-        ],
-        [
-            InlineKeyboardButton(text="📅 Перенести", callback_data=f"reschedule_{reminder_id}"),
-            InlineKeyboardButton(text=f"{PREMIUM_EMOJI['success']} Выполнено", callback_data=f"complete_{reminder_id}")
-        ],
-        [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="list_reminders")
-        ]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 # ============================================================================
 # BOT SETUP
 # ============================================================================
@@ -277,11 +259,6 @@ async def cmd_help(message: Message):
 /today - задачи на сегодня
 /settings - настройки
 /help - эта справка
-
-Примеры:
-• "стрижка завтра в 15:00"
-• "встреча 3 июня"
-• "купить молоко сегодня"
 """
     await message.answer(help_text, reply_markup=get_main_menu_keyboard())
 
@@ -297,8 +274,7 @@ async def cmd_list(message: Message):
     text = f"{PREMIUM_EMOJI['list']} Ваши напоминания:\n\n"
     for r in reminders:
         text += f"📌 {r['title']}\n"
-        text += f"📅 {r['date']} в {r['time']}\n"
-        text += f"{PREMIUM_EMOJI['category']} {r['category']} | {PREMIUM_EMOJI['priority']} {r['priority']}\n\n"
+        text += f"📅 {r['date']} в {r['time']}\n\n"
 
     await message.answer(text, reply_markup=get_main_menu_keyboard())
 
@@ -315,12 +291,6 @@ async def cmd_today(message: Message):
     for r in reminders:
         text += f"📌 {r['title']} в {r['time']}\n"
 
-    await message.answer(text, reply_markup=get_main_menu_keyboard())
-
-@dp.message(Command("settings"))
-async def cmd_settings(message: Message):
-    """Handle /settings command"""
-    text = f"{PREMIUM_EMOJI['settings']} Настройки:\n\nЧасовой пояс: {DEFAULT_TIMEZONE}\nУтренняя сводка: 08:00"
     await message.answer(text, reply_markup=get_main_menu_keyboard())
 
 @dp.message(F.text)
@@ -367,8 +337,7 @@ async def handle_text_message(message: Message, state: FSMContext):
     await message.answer(
         f"{PREMIUM_EMOJI['success']} Напоминание создано!\n\n"
         f"📌 {parsed['title']}\n"
-        f"📅 {parsed['date']} в {parsed['time']}\n"
-        f"{PREMIUM_EMOJI['category']} {parsed['category']} | {PREMIUM_EMOJI['priority']} {parsed['priority']}",
+        f"📅 {parsed['date']} в {parsed['time']}",
         reply_markup=get_main_menu_keyboard()
     )
 
@@ -384,8 +353,7 @@ async def callback_list_reminders(callback: CallbackQuery):
     text = f"{PREMIUM_EMOJI['list']} Ваши напоминания:\n\n"
     for r in reminders:
         text += f"📌 {r['title']}\n"
-        text += f"📅 {r['date']} в {r['time']}\n"
-        text += f"{PREMIUM_EMOJI['category']} {r['category']} | {PREMIUM_EMOJI['priority']} {r['priority']}\n\n"
+        text += f"📅 {r['date']} в {r['time']}\n\n"
 
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
@@ -396,8 +364,7 @@ async def callback_add_reminder(callback: CallbackQuery):
     await callback.message.edit_text(
         "Напишите напоминание обычным текстом, например:\n\n"
         "• стрижка завтра в 15:00\n"
-        "• встреча 3 июня в 10:00\n"
-        "• купить молоко сегодня",
+        "• встреча 3 июня в 10:00",
         reply_markup=get_main_menu_keyboard()
     )
     await callback.answer()
@@ -421,7 +388,7 @@ async def callback_today_reminders(callback: CallbackQuery):
 @dp.callback_query(F.data == "settings")
 async def callback_settings(callback: CallbackQuery):
     """Handle settings callback"""
-    text = f"{PREMIUM_EMOJI['settings']} Настройки:\n\nЧасовой пояс: {DEFAULT_TIMEZONE}\nУтренняя сводка: 08:00"
+    text = f"{PREMIUM_EMOJI['settings']} Настройки:\n\nЧасовой пояс: {DEFAULT_TIMEZONE}"
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
 
@@ -434,13 +401,6 @@ async def callback_help(callback: CallbackQuery):
 1️⃣ Просто напишите напоминание обычным текстом
 2️⃣ Я распознаю дату, время и событие
 3️⃣ Если чего-то не хватает, я уточню
-
-Команды:
-/start - главное меню
-/list - мои напоминания
-/today - задачи на сегодня
-/settings - настройки
-/help - эта справка
 """
     await callback.message.edit_text(help_text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
@@ -470,102 +430,43 @@ async def callback_delete_reminder(callback: CallbackQuery):
     await callback.answer()
 
 # ============================================================================
-# CRON HANDLER
-# ============================================================================
-
-async def check_and_send_reminders() -> Dict[str, int]:
-    """Check reminders and send notifications"""
-    sent_count = 0
-
-    for reminder in REMINDERS_DB.values():
-        if reminder["completed"]:
-            continue
-
-        user_id = reminder["user_id"]
-        user_timezone = USERS_DB.get(user_id, {}).get("timezone", DEFAULT_TIMEZONE)
-
-        tz = pytz.timezone(user_timezone)
-        now = datetime.now(tz)
-
-        reminder_datetime = datetime.strptime(
-            f"{reminder['date']} {reminder['time']}",
-            "%Y-%m-%d %H:%M"
-        )
-        reminder_datetime = tz.localize(reminder_datetime)
-
-        for minutes_before in reminder["remind_before_minutes"]:
-            notification_time = reminder_datetime - timedelta(minutes=minutes_before)
-
-            if now >= notification_time and now < notification_time + timedelta(minutes=5):
-                notif_key = f"{reminder['id']}_{minutes_before}"
-
-                if notif_key not in NOTIFICATIONS_SENT:
-                    if minutes_before == 0:
-                        text = f"{PREMIUM_EMOJI['time']} Напоминание!\n\n📌 {reminder['title']}\n⏰ Сейчас!"
-                    else:
-                        text = f"{PREMIUM_EMOJI['time']} Напоминание!\n\n📌 {reminder['title']}\n⏰ Через {minutes_before} минут"
-
-                    try:
-                        await bot.send_message(user_id, text)
-                        NOTIFICATIONS_SENT[notif_key] = {
-                            "reminder_id": reminder["id"],
-                            "minutes_before": minutes_before,
-                            "sent_at": datetime.now().isoformat()
-                        }
-                        sent_count += 1
-                    except Exception as e:
-                        logger.error(f"Error sending notification: {e}")
-
-    return {"sent": sent_count}
-
-# ============================================================================
 # VERCEL SERVERLESS HANDLER
 # ============================================================================
 
-from http.server import BaseHTTPRequestHandler
-import asyncio
+async def process_update(body: dict):
+    """Process Telegram update"""
+    try:
+        update = Update.model_validate(body, context={"bot": bot})
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logger.error(f"Error processing update: {e}")
 
-class handler(BaseHTTPRequestHandler):
+def handler(request):
     """Vercel serverless handler"""
+    import asyncio
 
-    def do_GET(self):
-        """Handle GET requests"""
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        response = json.dumps({"status": "ok", "message": "Reminder Bot is running"})
-        self.wfile.write(response.encode())
-        return
+    # GET request - health check
+    if request.method == 'GET':
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'status': 'ok', 'message': 'Reminder Bot is running'})
+        }
 
-    def do_POST(self):
-        """Handle POST requests (webhook)"""
-        try:
-            # Read request body
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            body = json.loads(post_data.decode('utf-8'))
+    # POST request - webhook
+    try:
+        body = json.loads(request.body)
+        asyncio.run(process_update(body))
 
-            # Process update asynchronously
-            asyncio.run(self._process_update(body))
-
-            # Send response
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            response = json.dumps({"ok": True})
-            self.wfile.write(response.encode())
-        except Exception as e:
-            logger.error(f"Webhook error: {e}")
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            response = json.dumps({"ok": True})
-            self.wfile.write(response.encode())
-
-    async def _process_update(self, body):
-        """Process Telegram update"""
-        try:
-            update = Update.model_validate(body, context={"bot": bot})
-            await dp.feed_update(bot, update)
-        except Exception as e:
-            logger.error(f"Error processing update: {e}")
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'ok': True})
+        }
+    except Exception as e:
+        logger.error(f"Handler error: {e}")
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'ok': True})
+        }
