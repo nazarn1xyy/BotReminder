@@ -227,7 +227,6 @@ dp = Dispatcher(storage=storage)
 # BOT HANDLERS
 # ============================================================================
 
-@dp.message(Command("start"))
 async def cmd_start(message: Message):
     """Handle /start command"""
     ensure_user_exists(message.from_user.id)
@@ -245,7 +244,6 @@ async def cmd_start(message: Message):
 
     await message.answer(welcome_text, reply_markup=get_main_menu_keyboard())
 
-@dp.message(Command("help"))
 async def cmd_help(message: Message):
     """Handle /help command"""
     help_text = """
@@ -264,7 +262,6 @@ async def cmd_help(message: Message):
 """
     await message.answer(help_text, reply_markup=get_main_menu_keyboard())
 
-@dp.message(Command("list"))
 async def cmd_list(message: Message):
     """Handle /list command"""
     reminders = get_user_reminders(message.from_user.id)
@@ -280,7 +277,6 @@ async def cmd_list(message: Message):
 
     await message.answer(text, reply_markup=get_main_menu_keyboard())
 
-@dp.message(Command("today"))
 async def cmd_today(message: Message):
     """Handle /today command"""
     reminders = get_today_reminders(message.from_user.id)
@@ -295,7 +291,6 @@ async def cmd_today(message: Message):
 
     await message.answer(text, reply_markup=get_main_menu_keyboard())
 
-@dp.message(F.text)
 async def handle_text_message(message: Message, state: FSMContext):
     """Handle text messages"""
     ensure_user_exists(message.from_user.id)
@@ -343,7 +338,6 @@ async def handle_text_message(message: Message, state: FSMContext):
         reply_markup=get_main_menu_keyboard()
     )
 
-@dp.callback_query(F.data == "list_reminders")
 async def callback_list_reminders(callback: CallbackQuery):
     """Handle list reminders callback"""
     reminders = get_user_reminders(callback.from_user.id)
@@ -360,7 +354,6 @@ async def callback_list_reminders(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
 
-@dp.callback_query(F.data == "add_reminder")
 async def callback_add_reminder(callback: CallbackQuery):
     """Handle add reminder callback"""
     await callback.message.edit_text(
@@ -371,7 +364,6 @@ async def callback_add_reminder(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data == "today_reminders")
 async def callback_today_reminders(callback: CallbackQuery):
     """Handle today reminders callback"""
     reminders = get_today_reminders(callback.from_user.id)
@@ -387,14 +379,12 @@ async def callback_today_reminders(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
 
-@dp.callback_query(F.data == "settings")
 async def callback_settings(callback: CallbackQuery):
     """Handle settings callback"""
     text = f"{PREMIUM_EMOJI['settings']} Настройки:\n\nЧасовой пояс: {DEFAULT_TIMEZONE}"
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
 
-@dp.callback_query(F.data == "help")
 async def callback_help(callback: CallbackQuery):
     """Handle help callback"""
     help_text = """
@@ -407,7 +397,6 @@ async def callback_help(callback: CallbackQuery):
     await callback.message.edit_text(help_text, reply_markup=get_main_menu_keyboard())
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("complete_"))
 async def callback_complete_reminder(callback: CallbackQuery):
     """Handle complete reminder callback"""
     reminder_id = int(callback.data.split("_")[1])
@@ -419,7 +408,6 @@ async def callback_complete_reminder(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("delete_"))
 async def callback_delete_reminder(callback: CallbackQuery):
     """Handle delete reminder callback"""
     reminder_id = int(callback.data.split("_")[1])
@@ -430,6 +418,26 @@ async def callback_delete_reminder(callback: CallbackQuery):
         reply_markup=get_main_menu_keyboard()
     )
     await callback.answer()
+
+# ============================================================================
+# REGISTER HANDLERS
+# ============================================================================
+
+# Register message handlers
+dp.message.register(cmd_start, Command("start"))
+dp.message.register(cmd_help, Command("help"))
+dp.message.register(cmd_list, Command("list"))
+dp.message.register(cmd_today, Command("today"))
+dp.message.register(handle_text_message, F.text)
+
+# Register callback handlers
+dp.callback_query.register(callback_list_reminders, F.data == "list_reminders")
+dp.callback_query.register(callback_add_reminder, F.data == "add_reminder")
+dp.callback_query.register(callback_today_reminders, F.data == "today_reminders")
+dp.callback_query.register(callback_settings, F.data == "settings")
+dp.callback_query.register(callback_help, F.data == "help")
+dp.callback_query.register(callback_complete_reminder, F.data.startswith("complete_"))
+dp.callback_query.register(callback_delete_reminder, F.data.startswith("delete_"))
 
 # ============================================================================
 # VERCEL SERVERLESS HANDLER
