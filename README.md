@@ -1,153 +1,96 @@
 # Telegram Reminder Bot с ИИ
 
-Telegram-бот-напоминалка с искусственным интеллектом на Python для Vercel.
+Быстрый и красивый Telegram-бот-напоминалка с искусственным интеллектом на Python.
+
+## Особенности
+
+✨ **Премиум эмодзи** - красивые анимированные эмодзи Telegram Premium  
+🤖 **ИИ распознавание** - Mistral AI понимает естественный язык  
+⚡ **Быстрый** - оптимизирован для максимальной скорости  
+🎨 **Красивый интерфейс** - inline и reply клавиатуры с премиум эмодзи  
+📱 **Polling** - стабильная работа без webhook  
 
 ## Технологии
 
 - **Python 3.11+**
-- **aiogram 3.x** - Telegram Bot API
+- **aiogram 3.15** - современный фреймворк для Telegram Bot API
 - **Mistral AI** - распознавание напоминаний
-- **Vercel** - serverless хостинг
-- **Webhook** архитектура (не polling)
-
-## Структура проекта
-
-```
-BotReminder/
-├── api/
-│   └── webhook.py       # Serverless функция для Vercel
-├── requirements.txt     # Python зависимости
-├── vercel.json         # Конфигурация Vercel
-├── .env.example        # Пример переменных окружения
-└── README.md           # Эта инструкция
-```
+- **httpx** - быстрые HTTP запросы
+- **pytz** - работа с часовыми поясами
 
 ## Быстрый старт
 
-### 1. Получите Telegram Bot Token
-
-1. Откройте [@BotFather](https://t.me/BotFather) в Telegram
-2. Отправьте `/newbot`
-3. Следуйте инструкциям
-4. Скопируйте токен
-
-### 2. Клонируйте репозиторий
+### 1. Установите зависимости
 
 ```bash
-git clone https://github.com/nazarn1xyy/BotReminder.git
-cd BotReminder
+pip install -r requirements.txt
 ```
 
-### 3. Деплой на Vercel
+### 2. Настройте переменные окружения
 
-#### Вариант А: Через Vercel Dashboard (рекомендуется)
+Отредактируйте `.env`:
+```env
+BOT_TOKEN=ваш_токен_бота
+MISTRAL_API_KEY=ваш_ключ_mistral
+DEFAULT_TIMEZONE=Europe/Chisinau
+```
 
-1. Зайдите на [vercel.com](https://vercel.com)
-2. Нажмите **Add New** → **Project**
-3. Импортируйте Git репозиторий `https://github.com/nazarn1xyy/BotReminder.git`
-4. Vercel автоматически определит Python проект
-5. Добавьте переменные окружения:
-   - `BOT_TOKEN` - ваш Telegram Bot Token
-   - `MISTRAL_API_KEY` - `7eMrGygzAbBjIhIuFXDEYqrMaxpyuHh5`
-   - `WEBHOOK_SECRET` - `my_secret_webhook_key`
-6. Нажмите **Deploy**
-7. Скопируйте URL проекта (например: `https://bot-reminder-xxx.vercel.app`)
-
-#### Вариант Б: Через Vercel CLI
+### 3. Запустите бота
 
 ```bash
-# Установите Vercel CLI
-npm i -g vercel
-
-# Войдите в аккаунт
-vercel login
-
-# Деплой
-vercel
-
-# После деплоя для продакшена
-vercel --prod
+python bot.py
 ```
 
-### 4. Установите Webhook
+## Деплой на Render.com
 
-После деплоя нужно установить webhook для Telegram.
-
-**Способ 1: Через curl**
+### Шаг 1: Создайте репозиторий
 
 ```bash
-curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://ваш-домен.vercel.app/api/webhook"}'
+git init
+git add .
+git commit -m "Initial commit"
+git remote add origin https://github.com/nazarn1xyy/BotReminder.git
+git push -u origin main
 ```
 
-**Способ 2: Через браузер**
+### Шаг 2: Создайте Web Service на Render
 
-Откройте в браузере:
-```
-https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://ваш-домен.vercel.app/api/webhook
-```
+1. Зайдите на [render.com](https://render.com)
+2. Нажмите **New** → **Web Service**
+3. Подключите GitHub репозиторий
+4. Настройте:
+   - **Name**: `bot-reminder`
+   - **Environment**: `Python 3`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `python bot.py`
+   - **Instance Type**: `Free`
 
-**Проверка webhook:**
+### Шаг 3: Добавьте переменные окружения
 
-```bash
-curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo"
-```
+В разделе **Environment** добавьте:
+- `BOT_TOKEN` = ваш токен от @BotFather
+- `MISTRAL_API_KEY` = `7eMrGygzAbBjIhIuFXDEYqrMaxpyuHh5`
+- `DEFAULT_TIMEZONE` = `Europe/Chisinau`
 
-### 5. Настройте Cron для напоминаний
+### Шаг 4: Deploy
 
-Для отправки напоминаний нужно периодически вызывать endpoint `/api/cron`.
-
-#### Вариант А: Vercel Cron Jobs
-
-Добавьте в `vercel.json`:
-
-```json
-{
-  "crons": [
-    {
-      "path": "/api/cron",
-      "schedule": "*/5 * * * *"
-    }
-  ]
-}
-```
-
-#### Вариант Б: Внешний cron-сервис
-
-Используйте [cron-job.org](https://cron-job.org) или [EasyCron](https://easycron.com):
-
-- URL: `https://ваш-домен.vercel.app/api/cron`
-- Интервал: каждые 5 минут (`*/5 * * * *`)
-
-#### Вариант В: GitHub Actions
-
-Создайте `.github/workflows/cron.yml`:
-
-```yaml
-name: Reminder Cron
-on:
-  schedule:
-    - cron: '*/5 * * * *'
-jobs:
-  cron:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Call cron endpoint
-        run: curl https://ваш-домен.vercel.app/api/cron
-```
+Нажмите **Create Web Service** и дождитесь деплоя.
 
 ## Использование
 
-### Команды бота
+### Команды
 
 - `/start` - запуск бота
 - `/help` - помощь
-- `/list` - список напоминаний
-- `/today` - задачи на сегодня
-- `/settings` - настройки
 
-### Примеры использования
+### Кнопки
+
+- **Добавить напоминание** - создать новое напоминание
+- **Мои напоминания** - список всех напоминаний
+- **Сегодня** - задачи на сегодня
+- **Настройки** - настройки бота
+
+### Примеры
 
 Просто напишите боту обычным текстом:
 
@@ -175,90 +118,69 @@ jobs:
 ## Функционал
 
 ✅ **Распознавание через ИИ** - Mistral AI понимает естественный язык  
-✅ **Напоминания** - за 2 часа, 30 минут и в момент события  
+✅ **Премиум эмодзи** - красивые анимированные эмодзи  
 ✅ **Категории** - личное, работа, учёба, здоровье, финансы, важное, другое  
 ✅ **Приоритеты** - обычное, важное, срочное  
-✅ **Повторяющиеся** - daily, weekly, monthly, yearly  
 ✅ **Inline-кнопки** - удобное управление  
+✅ **Reply-клавиатура** - быстрый доступ к функциям  
 ✅ **FSM** - уточнение недостающей информации  
-✅ **Webhook** - работает на serverless  
+✅ **Polling** - стабильная работа  
 
 ## Архитектура
 
-### Почему webhook, а не polling?
+### Polling vs Webhook
 
-**Polling** (постоянный опрос):
-- ❌ Не работает на serverless
-- ❌ Требует постоянный процесс
-- ❌ Больше нагрузка
+Этот бот использует **polling** (постоянный опрос Telegram API):
 
-**Webhook** (Telegram отправляет обновления):
-- ✅ Работает на serverless
-- ✅ Нет постоянного процесса
-- ✅ Меньше нагрузка
-- ✅ Быстрее отклик
+**Преимущества:**
+- ✅ Проще настроить
+- ✅ Работает везде (Render, Railway, VPS)
+- ✅ Не нужен SSL сертификат
+- ✅ Не нужен публичный URL
+
+**Недостатки:**
+- ❌ Немного больше нагрузка на сервер
+- ❌ Задержка ~1-2 секунды
 
 ### Хранение данных
 
-⚠️ **Важно:** Текущая версия использует in-memory хранилище (глобальные переменные Python). Данные сохраняются между запросами в рамках одного инстанса, но могут теряться при cold start.
+⚠️ **Важно:** Текущая версия использует in-memory хранилище (словари Python). Данные теряются при перезапуске.
 
-**Для продакшена рекомендуется использовать внешнюю БД:**
+**Для продакшена рекомендуется:**
 
-1. **Supabase PostgreSQL** (бесплатно)
-   - [supabase.com](https://supabase.com)
-   - Managed PostgreSQL
+1. **SQLite** - простая файловая БД
+2. **PostgreSQL** - для Render/Railway
+3. **MongoDB** - NoSQL вариант
+4. **Redis** - для кеша и быстрого доступа
 
-2. **Neon PostgreSQL** (бесплатно)
-   - [neon.tech](https://neon.tech)
-   - Serverless PostgreSQL
+## Премиум эмодзи
 
-3. **Turso SQLite** (бесплатно)
-   - [turso.tech](https://turso.tech)
-   - Managed SQLite в облаке
+Бот использует Telegram Premium эмодзи для красивого интерфейса:
 
-4. **Upstash Redis** (бесплатно)
-   - [upstash.com](https://upstash.com)
-   - Serverless Redis
+- ⚙ Настройки - `5870982283724328568`
+- 📅 Календарь - `5890937706803894250`
+- ⏰ Часы - `5983150113483134607`
+- ✅ Галочка - `5870633910337015697`
+- 🗑 Мусорка - `5870875489362513438`
+- И многие другие...
 
-## Endpoints
+## Производительность
 
-- `GET /api/webhook` - проверка работы бота
-- `POST /api/webhook` - прием обновлений от Telegram
-- `GET /api/cron` - проверка и отправка напоминаний
+Бот оптимизирован для максимальной скорости:
 
-## Переменные окружения
-
-Настройте в Vercel Dashboard → Settings → Environment Variables:
-
-```env
-BOT_TOKEN=your_telegram_bot_token_here
-MISTRAL_API_KEY=7eMrGygzAbBjIhIuFXDEYqrMaxpyuHh5
-WEBHOOK_SECRET=my_secret_webhook_key
-```
+- ⚡ Быстрые HTTP запросы через `httpx`
+- ⚡ Асинхронная обработка всех операций
+- ⚡ Минимальное использование памяти
+- ⚡ Таймаут AI запросов 10 секунд
+- ⚡ Лимит отображения напоминаний (10 шт)
 
 ## Troubleshooting
 
 ### Бот не отвечает
 
-1. Проверьте webhook:
-```bash
-curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo"
-```
-
-2. Проверьте логи в Vercel Dashboard → Deployments → Functions
-
+1. Проверьте, что бот запущен: `python bot.py`
+2. Проверьте логи в консоли
 3. Убедитесь, что `BOT_TOKEN` правильный
-
-### Напоминания не приходят
-
-1. Проверьте cron:
-```bash
-curl https://ваш-домен.vercel.app/api/cron
-```
-
-2. Убедитесь, что cron настроен (Vercel Cron Jobs или внешний сервис)
-
-3. Проверьте часовой пояс (по умолчанию `Europe/Chisinau`)
 
 ### Mistral API не работает
 
@@ -266,29 +188,11 @@ curl https://ваш-домен.vercel.app/api/cron
 2. Проверьте квоту на [console.mistral.ai](https://console.mistral.ai)
 3. Попробуйте формат: `стрижка 2026-06-03 15:00`
 
-## Разработка
+### Бот падает на Render
 
-### Локальное тестирование
-
-```bash
-# Установите зависимости
-pip install -r requirements.txt
-
-# Установите Vercel CLI
-npm i -g vercel
-
-# Запустите локально
-vercel dev
-```
-
-### Структура кода
-
-- `api/webhook.py` - основной код бота
-  - Обработчики команд (`/start`, `/help`, `/list`, `/today`)
-  - Обработчики callback-кнопок
-  - Интеграция с Mistral AI
-  - Cron для напоминаний
-  - Serverless handler для Vercel
+1. Проверьте логи в Render Dashboard
+2. Убедитесь, что все переменные окружения установлены
+3. Проверьте, что Start Command: `python bot.py`
 
 ## Лицензия
 
@@ -297,7 +201,3 @@ MIT
 ## Автор
 
 [@nazarn1xyy](https://github.com/nazarn1xyy)
-
-## Поддержка
-
-Если возникли проблемы, создайте [Issue](https://github.com/nazarn1xyy/BotReminder/issues)
